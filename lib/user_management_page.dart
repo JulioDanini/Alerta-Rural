@@ -1,16 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart' as auth;
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Importa Firebase Auth
+import 'login_page.dart'; // Importando a página de login
+import 'firebase_options.dart'; // Importa as opções geradas
 import 'package:flutter_masked_text2/flutter_masked_text2.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  runApp(MyApp());
+
+  try {
+    // Inicializa o Firebase com opções específicas para cada plataforma
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    runApp(const MyApp());
+  } catch (e) {
+    // Caso haja algum erro durante a inicialização
+    print('Erro ao inicializar o Firebase: $e');
+    runApp(const ErrorApp());
+  }
 }
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -18,8 +32,81 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.green,
         scaffoldBackgroundColor: Colors.white,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.green,
+          titleTextStyle: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green,
+            foregroundColor: Colors.white,
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.green,
+          ),
+        ),
+        switchTheme: SwitchThemeData(
+          thumbColor: MaterialStateProperty.resolveWith<Color>(
+            (Set<MaterialState> states) {
+              if (states.contains(MaterialState.disabled)) {
+                return Colors.grey;
+              }
+              return Colors.green;
+            },
+          ),
+          trackColor: MaterialStateProperty.resolveWith<Color>(
+            (Set<MaterialState> states) {
+              if (states.contains(MaterialState.disabled)) {
+                return Colors.grey.shade300;
+              }
+              return Colors.green.shade300;
+            },
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          border: const OutlineInputBorder(
+            borderSide: BorderSide(color: Colors.green),
+          ),
+          enabledBorder: const OutlineInputBorder(
+            borderSide: BorderSide(color: Colors.green),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderSide: BorderSide(color: Colors.green.shade700),
+          ),
+          errorBorder: const OutlineInputBorder(
+            borderSide: BorderSide(color: Colors.red),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderSide: BorderSide(color: Colors.red.shade700),
+          ),
+          labelStyle: const TextStyle(color: Colors.green),
+          hintStyle: TextStyle(color: Colors.green.shade300),
+        ),
       ),
-      home: UserManagementPage(isMasterUser: true), // Tela de Gerenciamento
+      home: const LoginPage(),
+    );
+  }
+}
+
+class ErrorApp extends StatelessWidget {
+  const ErrorApp({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Text(
+            'Erro ao inicializar o Firebase. Tente novamente mais tarde.',
+            style: TextStyle(fontSize: 18),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -37,6 +124,7 @@ class UserManagementPage extends StatefulWidget {
 class _UserManagementPageState extends State<UserManagementPage> {
   final List<UserData> users = [];
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   final TextEditingController _nameController = TextEditingController();
   final MaskedTextController _phoneController =
       MaskedTextController(mask: '(00)000000000');
@@ -44,7 +132,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
       MaskedTextController(mask: '(00)000000000');
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _userIdController = TextEditingController();
-  final TextEditingController _propertyNameController = TextEditingController();
+  final TextEditingController _propertyNameController =
+      TextEditingController();
   final TextEditingController _ruralCodeController = TextEditingController();
   final TextEditingController _geolocationController = TextEditingController();
 
@@ -58,16 +147,18 @@ class _UserManagementPageState extends State<UserManagementPage> {
   }
 
   Future<void> _loadUsers() async {
-    final QuerySnapshot snapshot = await _firestore.collection('users').get();
-    final List<UserData> loadedUsers = snapshot.docs.map((doc) {
-      return UserData.fromFirestore(doc);
-    }).toList();
+    // Use snapshots para escutar as mudanças em tempo real
+    _firestore.collection('users').snapshots().listen((snapshot) {
+      final List<UserData> loadedUsers = snapshot.docs.map((doc) {
+        return UserData.fromFirestore(doc);
+      }).toList();
 
-    setState(() {
-      users.addAll(loadedUsers);
+      setState(() {
+        users.clear(); // Limpa a lista antes de adicionar novos usuários
+        users.addAll(loadedUsers); // Adiciona os usuários atualizados
+      });
     });
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -84,7 +175,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
               itemBuilder: (context, index) {
                 final user = users[index];
                 return ListTile(
-                  title: Text(user.propertyName),
+                  title: Text(user.property_name),
                   subtitle:
                       Text('Usuário: ${user.name} - Telefone: ${user.phone}'),
                   trailing: Row(
@@ -98,9 +189,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         icon: const Icon(Icons.delete),
                         onPressed: () => _confirmDeleteUser(index),
                       ),
+                      IconButton(
+                        icon: const Icon(Icons.lock_reset),
+                        onPressed: () => _resetPassword(user.email),
+                      ),
                       Switch(
-                        value: user.isEnabled,
-                        onChanged: (value) => _toggleUserStatus(index),
+                        value: user.isMasterUser,
+                        onChanged: (value) => _toggleMasterUserStatus(index, value),
                       ),
                     ],
                   ),
@@ -115,9 +210,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _showUserDialog,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                    ),
                     child: const Text('Adicionar Usuário'),
                   ),
                 ),
@@ -129,25 +221,71 @@ class _UserManagementPageState extends State<UserManagementPage> {
     );
   }
 
-  void _resetPassword(int index) async {
-    final user = users[index];
-    await auth.FirebaseAuth.instance
-        .sendPasswordResetEmail(email: user.email);
+  Future<void> _toggleMasterUserStatus(int index, bool isMasterUser) async {
+  final user = users[index];
+  
+  // Verifica se o usuário logado é um master e está tentando alterar seu próprio estado
+  if (user.userId == _auth.currentUser!.uid && isMasterUser) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('E-mail de redefinição de senha enviado.')),
+      const SnackBar(
+        content: Text('Você não pode alterar seu próprio estado de usuário master.'),
+      ),
     );
+    return; // Não faz nada se for o próprio usuário master
   }
 
-  void _showUserDialog({UserData? user}) {
+  try {
+    // Atualiza o status de master no Firestore
+    await _firestore.collection('users').doc(user.userId).update({
+      'isMasterUser': isMasterUser,
+    });
+
+    setState(() {
+      users[index].isMasterUser = isMasterUser;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Usuário ${isMasterUser ? 'promovido a usuário master' : 'removido de usuário master'} com sucesso!'),
+      ),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Erro ao atualizar status: $e')),
+    );
+  }
+}
+
+  Future<void> _resetPassword(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Email de redefinição de senha enviado!')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao enviar email de redefinição: $e')),
+      );
+    }
+  }
+
+  void _editUser(int index) {
+    final user = users[index];
+    _nameController.text = user.name;
+    _phoneController.text = user.phone;
+    _emergencyPhoneController.text = user.emergency_phone;
+    _emailController.text = user.email;
+    _propertyNameController.text = user.property_name;
+    _ruralCodeController.text = user.rural_code;
+    _geolocationController.text = user.location;
+    _editingIndex = index;
+    _isMasterUser = user.isMasterUser;
+
+    _showUserDialog(user: user);
+  }
+
+  Future<void> _showUserDialog({UserData? user}) {
     if (user != null) {
-      _nameController.text = user.name;
-      _phoneController.text = user.phone;
-      _emergencyPhoneController.text = user.emergencyPhone;
-      _emailController.text = user.email;
-      _userIdController.text = user.userId;
-      _propertyNameController.text = user.propertyName;
-      _ruralCodeController.text = user.ruralCode;
-      _geolocationController.text = user.geolocation;
       _editingIndex = users.indexOf(user);
       _isMasterUser = user.isMasterUser;
     } else {
@@ -156,19 +294,19 @@ class _UserManagementPageState extends State<UserManagementPage> {
       _isMasterUser = false;
     }
 
-    showDialog(
+    return showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: Text(user == null ? 'Adicionar Usuário' : 'Editar Usuário'),
-          content: SingleChildScrollView(
+          content: SizedBox(
+            width: 300,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: _nameController,
-                  decoration:
-                      const InputDecoration(labelText: 'Nome do Usuário'),
+                  decoration: const InputDecoration(labelText: 'Nome'),
                 ),
                 TextField(
                   controller: _phoneController,
@@ -176,22 +314,15 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 ),
                 TextField(
                   controller: _emergencyPhoneController,
-                  decoration: const InputDecoration(
-                      labelText: 'Telefone de Emergência'),
+                  decoration: const InputDecoration(labelText: 'Telefone de Emergência'),
                 ),
                 TextField(
                   controller: _emailController,
-                  decoration:
-                      const InputDecoration(labelText: 'E-mail do Usuário'),
-                ),
-                TextField(
-                  controller: _userIdController,
-                  decoration: const InputDecoration(labelText: 'ID do Usuário'),
+                  decoration: const InputDecoration(labelText: 'Email'),
                 ),
                 TextField(
                   controller: _propertyNameController,
-                  decoration:
-                      const InputDecoration(labelText: 'Nome da Propriedade'),
+                  decoration: const InputDecoration(labelText: 'Nome da Propriedade'),
                 ),
                 TextField(
                   controller: _ruralCodeController,
@@ -199,13 +330,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 ),
                 TextField(
                   controller: _geolocationController,
-                  decoration:
-                      const InputDecoration(labelText: 'Geolocalização'),
+                  decoration: const InputDecoration(labelText: 'Geolocalização'),
                 ),
+                const SizedBox(height: 10),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Usuário Master'),
+                    const Text('Usuário Master:'),
                     Switch(
                       value: _isMasterUser,
                       onChanged: (value) {
@@ -226,16 +356,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
               },
               child: const Text('Cancelar'),
             ),
-            TextButton(
-              onPressed: () {
-                if (user == null) {
-                  _addUser();
-                } else {
-                  _updateUser();
+            ElevatedButton(
+              onPressed: () async {
+                if (await _saveUser(user)) {
+                  Navigator.of(context).pop();
                 }
-                Navigator.of(context).pop();
               },
-              child: Text(user == null ? 'Adicionar' : 'Salvar'),
+              child: const Text('Salvar'),
             ),
           ],
         );
@@ -243,125 +370,132 @@ class _UserManagementPageState extends State<UserManagementPage> {
     );
   }
 
-  Future<void> _addUser() async {
-    final validationErrors = _validateFields();
-    if (validationErrors.isEmpty) {
-      try {
-        final newUser = await auth.FirebaseAuth.instance
-            .createUserWithEmailAndPassword(
-                email: _emailController.text, password: '123456');
-        final userDoc = _firestore.collection('users').doc(newUser.user!.uid);
+  Future<bool> _saveUser(UserData? user) async {
+    final name = _nameController.text;
+    final phone = _phoneController.text;
+    final emergencyPhone = _emergencyPhoneController.text;
+    final email = _emailController.text;
+    final propertyName = _propertyNameController.text;
+    final ruralCode = _ruralCodeController.text;
+    final geolocation = _geolocationController.text;
 
-        final userData = UserData(
-          name: _nameController.text,
-          phone: _phoneController.text,
-          emergencyPhone: _emergencyPhoneController.text,
-          email: _emailController.text,
-          userId: _userIdController.text,
-          propertyName: _propertyNameController.text,
-          ruralCode: _ruralCodeController.text,
-          geolocation: _geolocationController.text,
-          isMasterUser: _isMasterUser,
-          isEnabled: true,
-        );
+    if (name.isEmpty || phone.isEmpty || email.isEmpty || propertyName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Por favor, preencha todos os campos obrigatórios.')),
+      );
+      return false;
+    }
 
-        await userDoc.set(userData.toFirestore());
-        setState(() {
-          users.add(userData);
+    try {
+      if (user == null) {
+        // Se não for um usuário existente, cria um novo
+        final UserCredential userCredential =
+            await _auth.createUserWithEmailAndPassword(email: email, password: 'usuario123');
+
+        // Salva a ID do usuário no Firestore
+        await _firestore.collection('users').doc(userCredential.user!.uid).set({
+          'name': name,
+          'phone': phone,
+          'emergency_phone': emergencyPhone,
+          'email': email,
+          'property_name': propertyName,
+          'rural_code': ruralCode,
+          'location': geolocation,
+          'isMasterUser': _isMasterUser,
+          'userId': userCredential.user!.uid, // Salva a ID do usuário
         });
-
-        _clearFields();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Usuário adicionado com sucesso!')),
-        );
-      } catch (e) {
-        _showErrorDialog([e.toString()]);
+      } else {
+        // Atualiza o usuário existente
+        await _firestore.collection('users').doc(user.userId).update({
+          'name': name,
+          'phone': phone,
+          'emergency_phone': emergencyPhone,
+          'email': email,
+          'property_name': propertyName,
+          'rural_code': ruralCode,
+          'location': geolocation,
+          'isMasterUser': _isMasterUser,
+        });
       }
-    } else {
-      _showErrorDialog(validationErrors);
-    }
-  }
 
-  Future<void> _updateUser() async {
-    final validationErrors = _validateFields();
-    if (validationErrors.isEmpty) {
-      setState(() {
-        if (_editingIndex != null) {
-          final user = users[_editingIndex!];
-          final userDoc = _firestore.collection('users').doc(user.userId);
-          final updatedUser = UserData(
-            name: _nameController.text,
-            phone: _phoneController.text,
-            emergencyPhone: _emergencyPhoneController.text,
-            email: _emailController.text,
-            userId: _userIdController.text,
-            propertyName: _propertyNameController.text,
-            ruralCode: _ruralCodeController.text,
-            geolocation: _geolocationController.text,
-            isMasterUser: _isMasterUser,
-            isEnabled: user.isEnabled,
-          );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Usuário salvo com sucesso!')),
+      );
 
-          users[_editingIndex!] = updatedUser;
-          userDoc.set(updatedUser.toFirestore());
-        }
-        _clearFields();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Usuário atualizado com sucesso!')),
+      // Atualiza a lista de usuários
+      if (user == null) {
+        users.add(UserData(
+          userId: _auth.currentUser!.uid, // Atualiza a lista com a nova ID
+          name: name,
+          phone: phone,
+          emergency_phone: emergencyPhone,
+          email: email,
+          property_name: propertyName,
+          rural_code: ruralCode,
+          location: geolocation,
+          isMasterUser: _isMasterUser,
+        ));
+      } else {
+        users[_editingIndex!] = UserData(
+          userId: user.userId,
+          name: name,
+          phone: phone,
+          emergency_phone: emergencyPhone,
+          email: email,
+          property_name: propertyName,
+          rural_code: ruralCode,
+          location: geolocation,
+          isMasterUser: _isMasterUser,
         );
-      });
-    } else {
-      _showErrorDialog(validationErrors);
+      }
+
+      return true;
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao salvar usuário: $e')),
+      );
+      return false;
     }
   }
 
-  void _editUser(int index) {
+  Future<void> _confirmDeleteUser(int index) async {
     final user = users[index];
-    _showUserDialog(user: user);
-  }
 
-  Future<void> _deleteUser(int index) async {
-    final user = users[index];
-    await _firestore.collection('users').doc(user.userId).delete();
-    setState(() {
-      users.removeAt(index);
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Usuário removido com sucesso!')),
-    );
-  }
-
-  void _confirmDeleteUser(int index) {
-    showDialog(
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Excluir Usuário'),
-          content: const Text('Tem certeza que deseja excluir este usuário?'),
+          title: const Text('Confirmar Exclusão'),
+          content: const Text('Você tem certeza que deseja excluir este usuário?'),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+              onPressed: () => Navigator.of(context).pop(false),
               child: const Text('Cancelar'),
             ),
             TextButton(
-              onPressed: () {
-                _deleteUser(index);
-                Navigator.of(context).pop();
-              },
+              onPressed: () => Navigator.of(context).pop(true),
               child: const Text('Excluir'),
             ),
           ],
         );
       },
     );
-  }
 
-  void _toggleUserStatus(int index) {
-    setState(() {
-      users[index].isEnabled = !users[index].isEnabled;
-    });
+    if (confirmed == true) {
+      try {
+        await _firestore.collection('users').doc(user.userId).delete();
+        setState(() {
+          users.removeAt(index);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Usuário excluído com sucesso!')),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao excluir usuário: $e')),
+        );
+      }
+    }
   }
 
   void _clearFields() {
@@ -369,107 +503,46 @@ class _UserManagementPageState extends State<UserManagementPage> {
     _phoneController.clear();
     _emergencyPhoneController.clear();
     _emailController.clear();
-    _userIdController.clear();
     _propertyNameController.clear();
     _ruralCodeController.clear();
     _geolocationController.clear();
   }
-
-  List<String> _validateFields() {
-    final errors = <String>[];
-
-    if (_nameController.text.isEmpty) {
-      errors.add('Nome é obrigatório.');
-    }
-    if (_phoneController.text.isEmpty) {
-      errors.add('Telefone é obrigatório.');
-    }
-    if (_emergencyPhoneController.text.isEmpty) {
-      errors.add('Telefone de emergência é obrigatório.');
-    }
-    if (_emailController.text.isEmpty) {
-      errors.add('E-mail é obrigatório.');
-    }
-
-    return errors;
-  }
-
-  void _showErrorDialog(List<String> errors) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Erro'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: errors.map((e) => Text(e)).toList(),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('OK'),
-            ),
-          ],
-        );
-      },
-    );
-  }
 }
 
 class UserData {
-  String name;
-  String phone;
-  String emergencyPhone;
-  String email;
-  String userId;
-  String propertyName;
-  String ruralCode;
-  String geolocation;
+  final String userId;
+  final String name;
+  final String phone;
+  final String emergency_phone;
+  final String email;
+  final String property_name;
+  final String rural_code;
+  final String location;
   bool isMasterUser;
-  bool isEnabled;
 
   UserData({
+    required this.userId,
     required this.name,
     required this.phone,
-    required this.emergencyPhone,
+    required this.emergency_phone,
     required this.email,
-    required this.userId,
-    required this.propertyName,
-    required this.ruralCode,
-    required this.geolocation,
+    required this.property_name,
+    required this.rural_code,
+    required this.location,
     required this.isMasterUser,
-    required this.isEnabled,
   });
 
   factory UserData.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
     return UserData(
-      name: data['name'] ?? '',
-      phone: data['phone'] ?? '',
-      emergencyPhone: data['emergencyPhone'] ?? '',
-      email: data['email'] ?? '',
       userId: doc.id,
-      propertyName: data['propertyName'] ?? '',
-      ruralCode: data['ruralCode'] ?? '',
-      geolocation: data['geolocation'] ?? '',
-      isMasterUser: data['isMasterUser'] ?? false,
-      isEnabled: data['isEnabled'] ?? true,
+      name: doc['name'],
+      phone: doc['phone'],
+      emergency_phone: doc['emergency_phone'],
+      email: doc['email'],
+      property_name: doc['property_name'],
+      rural_code: doc['rural_code'],
+      location: doc['location'],
+      isMasterUser: doc['isMasterUser'] ?? false,
     );
-  }
-
-  Map<String, dynamic> toFirestore() {
-    return {
-      'name': name,
-      'phone': phone,
-      'emergencyPhone': emergencyPhone,
-      'email': email,
-      'propertyName': propertyName,
-      'ruralCode': ruralCode,
-      'geolocation': geolocation,
-      'isMasterUser': isMasterUser,
-      'isEnabled': isEnabled,
-    };
   }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'chat_page.dart'; // Importe a página de chat
+import 'package:cloud_firestore/cloud_firestore.dart'; // Para usar o Firestore
 
 class LoginPage extends StatefulWidget {
   const LoginPage({Key? key}) : super(key: key);
@@ -12,8 +14,47 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _resetEmailController = TextEditingController(); // Controlador para o email de resetar senha
-  final FirebaseAuth _auth = FirebaseAuth.instance; // Instância do FirebaseAuth
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  bool _rememberMe = false; // Variável para controlar o estado de "Lembrar Senha"
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials(); // Carrega as credenciais salvas ao iniciar
+  }
+
+  void _loadSavedCredentials() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? savedEmail = prefs.getString('email');
+    String? savedPassword = prefs.getString('password');
+    bool rememberMe = prefs.getBool('rememberMe') ?? false;
+
+    if (rememberMe && savedEmail != null && savedPassword != null) {
+      setState(() {
+        _rememberMe = true;
+        _emailController.text = savedEmail;
+        _passwordController.text = savedPassword;
+      });
+    }
+  }
+
+  // Função para verificar se o usuário é master
+  Future<bool> checkIfUserIsMaster(String userId) async {
+    try {
+      final DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      
+      if (userDoc.exists) {
+        final data = userDoc.data() as Map<String, dynamic>?;
+
+        // Altera o campo para 'isMasterUser'
+        return data?['isMasterUser'] ?? false;
+      }
+    } catch (e) {
+      print('Erro ao verificar se o usuário é master: $e');
+    }
+    
+    return false; // Retorna false se o documento não existir ou ocorrer um erro
+  }
 
   void _login() async {
     final email = _emailController.text;
@@ -25,18 +66,27 @@ class _LoginPageState extends State<LoginPage> {
         password: password,
       );
 
-      // Verifica se o usuário é master ou comum (pode ser baseado em roles, aqui simplificado)
-      bool isMaster = email == 'admin@admin.com'; // Exemplo simplificado
+      if (_rememberMe) {
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setString('email', email);
+        await prefs.setString('password', password);
+        await prefs.setBool('rememberMe', true);
+      } else {
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.remove('email');
+        await prefs.remove('password');
+        await prefs.setBool('rememberMe', false);
+      }
 
-      // Navegar para a página correta com base no tipo de usuário
+      bool isMaster = await checkIfUserIsMaster(userCredential.user!.uid);
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => ChatPage(isMasterUser: isMaster), // Passando se o usuário é master
+          builder: (context) => ChatPage(isMasterUser: isMaster),
         ),
       );
     } catch (e) {
-      // Exibe mensagem de erro se o login falhar
       showDialog(
         context: context,
         builder: (context) {
@@ -57,7 +107,6 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // Função para exibir caixa de diálogo "Esqueci minha senha"
   void _forgotPassword() {
     showDialog(
       context: context,
@@ -65,14 +114,14 @@ class _LoginPageState extends State<LoginPage> {
         return AlertDialog(
           title: const Text(
             'Esqueci minha senha',
-            style: TextStyle(color: Colors.green), // Definindo a cor do texto do título
+            style: TextStyle(color: Colors.green),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text('Digite o seu e-mail para redefinir sua senha.'),
               TextField(
-                controller: _resetEmailController,
+                controller: _emailController,
                 decoration: const InputDecoration(labelText: 'E-mail'),
               ),
             ],
@@ -80,11 +129,10 @@ class _LoginPageState extends State<LoginPage> {
           actions: [
             TextButton(
               onPressed: () async {
-                String resetEmail = _resetEmailController.text;
+                String resetEmail = _emailController.text;
                 if (resetEmail.isNotEmpty) {
                   try {
                     await _auth.sendPasswordResetEmail(email: resetEmail);
-                    // Fechar o diálogo após enviar
                     Navigator.of(context).pop();
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -92,7 +140,6 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     );
                   } catch (e) {
-                    // Exibir erro se o email não for encontrado
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Erro ao enviar email de redefinição.'),
@@ -128,9 +175,8 @@ class _LoginPageState extends State<LoginPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Adiciona uma imagem acima dos campos
             Image.asset(
-              'assets/logo.png', // Certifique-se de que o arquivo está no diretório assets
+              'assets/logo.png',
               height: 200,
               width: 200,
             ),
@@ -145,15 +191,37 @@ class _LoginPageState extends State<LoginPage> {
               obscureText: true,
             ),
             const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _rememberMe,
+                      onChanged: (value) {
+                        setState(() {
+                          _rememberMe = value!;
+                        });
+                      },
+                    ),
+                    const Text('Lembrar Senha'),
+                  ],
+                ),
+              ],
+            ),
             ElevatedButton(
               onPressed: _login,
               child: const Text('Login'),
             ),
             const SizedBox(height: 10),
             TextButton(
-              onPressed: _forgotPassword, // Chama a função de "Esqueci minha senha"
+              onPressed: _forgotPassword,
               child: const Text('Esqueci minha senha'),
             ),
+            const Spacer(), 
+            const Text('Versão: 1.0.0'), 
+            const SizedBox(height: 5),
+            const Text('Desenvolvido por Julio Danini - Copyright'),
           ],
         ),
       ),

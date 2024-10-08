@@ -17,7 +17,7 @@ class _ProfilePageState extends State<ProfilePage> {
   final TextEditingController _locationController = TextEditingController();
   final TextEditingController _propertyNameController = TextEditingController();
   final TextEditingController _ruralCodeController = TextEditingController();
-  final MaskedTextController _emergencyPhoneController = MaskedTextController(mask: '(00)00000-0000');
+  final MaskedTextController _emergencyPhoneController = MaskedTextController(mask: '(00)000000000');
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _idController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
@@ -33,24 +33,29 @@ class _ProfilePageState extends State<ProfilePage> {
     if (currentUser != null) {
       _emailController.text = currentUser!.email!;
       _idController.text = currentUser!.uid;
-      _loadUserProfile(); // Carrega o perfil do usuário ao iniciar
+      _loadUserProfileByEmail(_emailController.text); // Carrega o perfil do usuário pelo email
     }
   }
 
-  Future<void> _loadUserProfile() async {
+  // Carrega o perfil do usuário pelo email cadastrado
+  Future<void> _loadUserProfileByEmail(String email) async {
     try {
-      DocumentSnapshot doc = await _firestore
+      QuerySnapshot querySnapshot = await _firestore
           .collection('users')
-          .doc(currentUser!.uid)
+          .where('email', isEqualTo: email)
           .get();
 
-      if (doc.exists) {
-        var data = doc.data() as Map<String, dynamic>;
-        _locationController.text = data['location'] ?? '';
-        _propertyNameController.text = data['property_name'] ?? '';
-        _ruralCodeController.text = data['rural_code'] ?? '';
-        _emergencyPhoneController.text = data['emergency_phone'] ?? '';
-        _nameController.text = data['name'] ?? '';
+      if (querySnapshot.docs.isNotEmpty) {
+        var data = querySnapshot.docs[0].data() as Map<String, dynamic>;
+        setState(() {
+          _locationController.text = data['location'] ?? '';
+          _propertyNameController.text = data['property_name'] ?? '';
+          _ruralCodeController.text = data['rural_code'] ?? '';
+          _emergencyPhoneController.text = data['emergency_phone'] ?? '';
+          _nameController.text = data['name'] ?? '';
+        });
+      } else {
+        print('Nenhum usuário encontrado com o email $email');
       }
     } catch (e) {
       print('Erro ao carregar o perfil: $e');
@@ -97,7 +102,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   bool _validatePhoneNumber(String phone) {
-    final RegExp phoneExp = RegExp(r'^\(\d{2}\)\d{4,5}-\d{4}$');
+    final RegExp phoneExp = RegExp(r'^\(\d{2}\)\d{8,9}$');     
     return phoneExp.hasMatch(phone);
   }
 
@@ -115,7 +120,7 @@ class _ProfilePageState extends State<ProfilePage> {
           children: [
             TextField(
               controller: _nameController,
-              decoration: const InputDecoration(labelText: 'Nome'),
+              decoration: const InputDecoration(labelText: 'Nome do Usuário'),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -134,11 +139,6 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
             const SizedBox(height: 16),
             ListTile(
-              title: const Text('ID do Usuário'),
-              subtitle: Text(_idController.text),
-            ),
-            const SizedBox(height: 16),
-            ListTile(
               title: const Text('Nome da Propriedade'),
               subtitle: Text(_propertyNameController.text),
             ),
@@ -151,6 +151,11 @@ class _ProfilePageState extends State<ProfilePage> {
             ListTile(
               title: const Text('Geolocalização Plus Codes'),
               subtitle: Text(_locationController.text),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              title: const Text('ID do Usuário'),
+              subtitle: Text(_idController.text),
             ),
             const SizedBox(height: 16),
             ElevatedButton(
