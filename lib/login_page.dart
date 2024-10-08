@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'chat_page.dart'; // Importe a página de chat
 
 class LoginPage extends StatefulWidget {
@@ -12,32 +13,29 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _resetEmailController = TextEditingController(); // Controlador para o email de resetar senha
+  final FirebaseAuth _auth = FirebaseAuth.instance; // Instância do FirebaseAuth
 
-  // Lista de usuários - você pode substituir isso por uma lógica de autenticação real
-  final List<User> users = [
-    User(name: 'admin', email: 'admin@admin.com', password: '123', isMaster: true), // Usuário master
-    User(name: 'user', email: 'user@user.com', password: '123', isMaster: false), // Usuário comum
-  ];
-
-  void _login() {
+  void _login() async {
     final email = _emailController.text;
     final password = _passwordController.text;
 
-    // Autenticação básica
-    User? loggedInUser = users.firstWhere(
-      (user) => user.email == email && user.password == password,
-      orElse: () => User(name: '', email: '', password: '', isMaster: false),
-    );
+    try {
+      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
 
-    if (loggedInUser.name.isNotEmpty) {
+      // Verifica se o usuário é master ou comum (pode ser baseado em roles, aqui simplificado)
+      bool isMaster = email == 'admin@admin.com'; // Exemplo simplificado
+
       // Navegar para a página correta com base no tipo de usuário
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => ChatPage(isMasterUser: loggedInUser.isMaster), // Passando se o usuário é master
+          builder: (context) => ChatPage(isMasterUser: isMaster), // Passando se o usuário é master
         ),
       );
-    } else {
+    } catch (e) {
       // Exibe mensagem de erro se o login falhar
       showDialog(
         context: context,
@@ -64,11 +62,11 @@ class _LoginPageState extends State<LoginPage> {
     showDialog(
       context: context,
       builder: (context) {
-      return AlertDialog(
-        title: const Text(
-          'Esqueci minha senha',
-          style: TextStyle(color: Colors.green), // Definindo a cor do texto do título
-        ),
+        return AlertDialog(
+          title: const Text(
+            'Esqueci minha senha',
+            style: TextStyle(color: Colors.green), // Definindo a cor do texto do título
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -81,17 +79,26 @@ class _LoginPageState extends State<LoginPage> {
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                // Aqui você pode adicionar a lógica para enviar o email de redefinição
+              onPressed: () async {
                 String resetEmail = _resetEmailController.text;
                 if (resetEmail.isNotEmpty) {
-                  // Fechar o diálogo após enviar
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Nova senha enviada para $resetEmail.'),
-                    ),
-                  );
+                  try {
+                    await _auth.sendPasswordResetEmail(email: resetEmail);
+                    // Fechar o diálogo após enviar
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Nova senha enviada para $resetEmail.'),
+                      ),
+                    );
+                  } catch (e) {
+                    // Exibir erro se o email não for encontrado
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Erro ao enviar email de redefinição.'),
+                      ),
+                    );
+                  }
                 }
               },
               child: const Text('Enviar'),
@@ -152,13 +159,4 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
-}
-
-class User {
-  final String name;
-  final String email;
-  final String password; // Adicione a propriedade de senha
-  final bool isMaster;
-
-  User({required this.name, required this.email, required this.password, required this.isMaster});
 }

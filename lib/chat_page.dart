@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'dart:async'; // Importar o pacote necessário
+import 'dart:async'; // Para o Timer
+import 'package:cloud_firestore/cloud_firestore.dart'; // Importando o Firestore
+import 'package:firebase_auth/firebase_auth.dart'; // Importando a autenticação do Firebase
 import 'profile_page.dart'; // Importando a página de perfil
 import 'login_page.dart'; // Importando a página de login
 import 'user_management_page.dart'; // Importando a página de gerenciamento de usuários
@@ -15,7 +17,6 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
-  final List<String> messages = [];
   final TextEditingController _controller = TextEditingController();
   String? userLocation; // Armazena a localização do usuário
   String? propertyName; // Nome da propriedade
@@ -25,22 +26,30 @@ class _ChatPageState extends State<ChatPage> {
   String userId = ""; // ID do usuário
   String email = ""; // E-mail do usuário
   bool _isAlertButtonEnabled = true; // Controle do botão de alerta
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance; // Instância do Firestore
+  final User? currentUser = FirebaseAuth.instance.currentUser; // Usuário logado
 
-  void _sendMessage() {
-    setState(() {
-      if (_controller.text.isNotEmpty) {
-        String timestamp = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
-        messages.add('$username: ${_controller.text} \nEnviado em: $timestamp');
-        _controller.clear();
-      }
-    });
+  // Função para enviar mensagem
+  void _sendMessage() async {
+    if (_controller.text.isNotEmpty) {
+      String timestamp = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+      String message = '$username: ${_controller.text} \nEnviado em: $timestamp';
+
+      _controller.clear();
+
+      // Salva a mensagem no Firestore
+      await _firestore.collection('messages').add({
+        'message': message,
+        'timestamp': DateTime.now(),
+        'senderId': currentUser?.uid,
+      });
+    }
   }
 
   // Envia o alerta com as informações da propriedade
-  void _sendAlert() {
-    setState(() {
-      String timestamp = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
-      String alertMessage = '''
+  void _sendAlert() async {
+    String timestamp = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+    String alertMessage = '''
 🚨 ALERTA 🚨
 Enviado por: $username
 Propriedade: ${propertyName ?? "Desconhecida"}
@@ -48,16 +57,23 @@ Código Rural: ${ruralCode ?? "Desconhecido"}
 Telefone de Emergência: ${emergencyPhone ?? "Não disponível"}
 Localização(Plus Codes): ${userLocation ?? "Não disponível"}
 Enviado em: $timestamp''';
-      
-      // Adiciona o alerta na lista com a cor vermelha
-      messages.add(alertMessage);
-      _isAlertButtonEnabled = false; // Desabilita o botão de alerta
 
-      // Reinicia o botão após 3 minutos
-      Timer(const Duration(minutes: 3), () {
-        setState(() {
-          _isAlertButtonEnabled = true; // Reabilita o botão de alerta
-        });
+    setState(() {
+      _isAlertButtonEnabled = false;
+    });
+
+    // Salva o alerta no Firestore
+    await _firestore.collection('messages').add({
+      'message': alertMessage,
+      'timestamp': DateTime.now(),
+      'senderId': currentUser?.uid,
+      'isAlert': true,
+    });
+
+    // Reinicia o botão após 3 minutos
+    Timer(const Duration(minutes: 3), () {
+      setState(() {
+        _isAlertButtonEnabled = true;
       });
     });
 
@@ -66,8 +82,7 @@ Enviado em: $timestamp''';
       builder: (context) {
         return AlertDialog(
           title: const Text('Alerta Enviado'),
-          content: const Text(
-              'Alerta enviado com sucesso! Botão desabilitado por 3 minutos.'),
+          content: const Text('Alerta enviado com sucesso! Botão desabilitado por 3 minutos.'),
           actions: [
             TextButton(
               onPressed: () {
@@ -81,7 +96,8 @@ Enviado em: $timestamp''';
     );
   }
 
-  void _logout() {
+  void _logout() async {
+    await FirebaseAuth.instance.signOut();
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (context) => const LoginPage()),
@@ -144,7 +160,6 @@ Enviado em: $timestamp''';
                 );
               },
             ),
-            // Condicional para exibir o botão de cadastro de usuários
             if (widget.isMasterUser) ...[
               ListTile(
                 leading: const Icon(Icons.group_add),
@@ -163,25 +178,37 @@ Enviado em: $timestamp''';
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              itemCount: messages.length,
-              itemBuilder: (context, index) {
-                // Verifica se a mensagem é um alerta (começa com "🚨 ALERTA 🚨")
-                if (messages[index].startsWith('🚨 ALERTA 🚨')) {
-                  return ListTile(
-                    title: Text(
-                      messages[index],
-                      style: const TextStyle(
-                        color: Colors.red, // Define a cor vermelha para o alerta
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  );
-                } else {
-                  return ListTile(
-                    title: Text(messages[index]),
-                  );
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _firestore.collection('messages').orderBy('timestamp').snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
                 }
+
+                var messages = snapshot.data!.docs;
+
+                return ListView.builder(
+                  itemCount: messages.length,
+                  itemBuilder: (context, index) {
+                    String messageText = messages[index]['message'];
+                    // Verifica se a mensagem é um alerta (começa com "🚨 ALERTA 🚨")
+                    if (messageText.startsWith('🚨 ALERTA 🚨')) {
+                      return ListTile(
+                        title: Text(
+                          messageText,
+                          style: const TextStyle(
+                            color: Colors.red, // Define a cor vermelha para o alerta
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      );
+                    } else {
+                      return ListTile(
+                        title: Text(messageText),
+                      );
+                    }
+                  },
+                );
               },
             ),
           ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_masked_text2/flutter_masked_text2.dart'; // Importa o pacote de máscara
+import 'package:flutter_masked_text2/flutter_masked_text2.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ProfilePage extends StatefulWidget {
   final Function(String, String, String, String, String, String, String)
@@ -15,28 +17,85 @@ class _ProfilePageState extends State<ProfilePage> {
   final TextEditingController _locationController = TextEditingController();
   final TextEditingController _propertyNameController = TextEditingController();
   final TextEditingController _ruralCodeController = TextEditingController();
-  final MaskedTextController _emergencyPhoneController = MaskedTextController(
-      mask: '(00)00000-0000'); // Aplica a máscara de telefone
+  final MaskedTextController _emergencyPhoneController = MaskedTextController(mask: '(00)00000-0000');
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _idController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
 
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  User? currentUser;
+
   @override
   void initState() {
     super.initState();
-
-    // Preencher os campos com valores de exemplo
-    _idController.text = "123456";
-    _propertyNameController.text = "Fazenda Esperança";
-    _ruralCodeController.text = "RURAL-001";
-    _emailController.text = "usuario@exemplo.com";
-    _locationController.text = "X6C9+VW São Carlos, São Paulo";
-    _nameController.text = "João Silva";
-    _emergencyPhoneController.text =
-        "(99)99999-9999"; // Preenche o telefone de emergência com a máscara
+    currentUser = _auth.currentUser;
+    if (currentUser != null) {
+      _emailController.text = currentUser!.email!;
+      _idController.text = currentUser!.uid;
+      _loadUserProfile(); // Carrega o perfil do usuário ao iniciar
+    }
   }
 
-  // Função de validação de número de telefone
+  Future<void> _loadUserProfile() async {
+    try {
+      DocumentSnapshot doc = await _firestore
+          .collection('users')
+          .doc(currentUser!.uid)
+          .get();
+
+      if (doc.exists) {
+        var data = doc.data() as Map<String, dynamic>;
+        _locationController.text = data['location'] ?? '';
+        _propertyNameController.text = data['property_name'] ?? '';
+        _ruralCodeController.text = data['rural_code'] ?? '';
+        _emergencyPhoneController.text = data['emergency_phone'] ?? '';
+        _nameController.text = data['name'] ?? '';
+      }
+    } catch (e) {
+      print('Erro ao carregar o perfil: $e');
+    }
+  }
+
+  Future<void> _saveUserProfile() async {
+    if (_validatePhoneNumber(_emergencyPhoneController.text)) {
+      try {
+        await _firestore.collection('users').doc(currentUser!.uid).set({
+          'location': _locationController.text,
+          'property_name': _propertyNameController.text,
+          'rural_code': _ruralCodeController.text,
+          'emergency_phone': _emergencyPhoneController.text,
+          'name': _nameController.text,
+          'email': _emailController.text,
+          'user_id': _idController.text,
+        });
+
+        widget.onLocationSaved(
+          _locationController.text,
+          _propertyNameController.text,
+          _ruralCodeController.text,
+          _emergencyPhoneController.text,
+          _nameController.text,
+          _idController.text,
+          _emailController.text,
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Perfil salvo com sucesso!')),
+        );
+      } catch (e) {
+        print('Erro ao salvar perfil: $e');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro ao salvar o perfil')),
+        );
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Por favor, insira um número de telefone válido')),
+      );
+    }
+  }
+
   bool _validatePhoneNumber(String phone) {
     final RegExp phoneExp = RegExp(r'^\(\d{2}\)\d{4,5}-\d{4}$');
     return phoneExp.hasMatch(phone);
@@ -54,14 +113,11 @@ class _ProfilePageState extends State<ProfilePage> {
         padding: const EdgeInsets.all(16.0),
         child: ListView(
           children: [
-            // Nome (editável)
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(labelText: 'Nome'),
             ),
             const SizedBox(height: 16),
-
-            // Telefone de Emergência (com máscara)
             TextField(
               controller: _emergencyPhoneController,
               decoration: InputDecoration(
@@ -72,64 +128,33 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // E-mail (não editável)
             ListTile(
               title: const Text('E-mail'),
               subtitle: Text(_emailController.text),
             ),
             const SizedBox(height: 16),
-
-            // ID (não editável)
             ListTile(
               title: const Text('ID do Usuário'),
               subtitle: Text(_idController.text),
             ),
             const SizedBox(height: 16),
-
-            // Nome da Propriedade (não editável)
             ListTile(
               title: const Text('Nome da Propriedade'),
               subtitle: Text(_propertyNameController.text),
             ),
             const SizedBox(height: 16),
-
-            // Código Rural (não editável)
             ListTile(
               title: const Text('Código Rural do Município'),
               subtitle: Text(_ruralCodeController.text),
             ),
             const SizedBox(height: 16),
-
-            // Localização (não editável)
             ListTile(
-              title: const Text('Geolocalização PLus Codes'),
+              title: const Text('Geolocalização Plus Codes'),
               subtitle: Text(_locationController.text),
             ),
             const SizedBox(height: 16),
-
-            // Botão para salvar as alterações
             ElevatedButton(
-              onPressed: () {
-                if (_validatePhoneNumber(_emergencyPhoneController.text)) {
-                  widget.onLocationSaved(
-                    _locationController.text,
-                    _propertyNameController.text,
-                    _ruralCodeController.text,
-                    _emergencyPhoneController.text,
-                    _nameController.text,
-                    _idController.text,
-                    _emailController.text,
-                  );
-                  Navigator.pop(context);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text(
-                            'Por favor, insira um número de telefone válido')),
-                  );
-                }
-              },
+              onPressed: _saveUserProfile,
               child: const Text('Salvar'),
             ),
           ],

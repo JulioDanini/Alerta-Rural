@@ -1,6 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart' as auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_masked_text2/flutter_masked_text2.dart';
 
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Alerta Rural',
+      theme: ThemeData(
+        primarySwatch: Colors.green,
+        scaffoldBackgroundColor: Colors.white,
+      ),
+      home: UserManagementPage(isMasterUser: true), // Tela de Gerenciamento
+    );
+  }
+}
 
 class UserManagementPage extends StatefulWidget {
   final bool isMasterUser;
@@ -13,7 +35,8 @@ class UserManagementPage extends StatefulWidget {
 }
 
 class _UserManagementPageState extends State<UserManagementPage> {
-  final List<User> users = [];
+  final List<UserData> users = [];
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final TextEditingController _nameController = TextEditingController();
   final MaskedTextController _phoneController =
       MaskedTextController(mask: '(00)000000000');
@@ -29,9 +52,26 @@ class _UserManagementPageState extends State<UserManagementPage> {
   bool _isMasterUser = false;
 
   @override
+  void initState() {
+    super.initState();
+    _loadUsers();
+  }
+
+  Future<void> _loadUsers() async {
+    final QuerySnapshot snapshot = await _firestore.collection('users').get();
+    final List<UserData> loadedUsers = snapshot.docs.map((doc) {
+      return UserData.fromFirestore(doc);
+    }).toList();
+
+    setState(() {
+      users.addAll(loadedUsers);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white, // Fundo branco
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.green,
         title: const Text('Gerenciamento de Usuários'),
@@ -58,10 +98,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         icon: const Icon(Icons.delete),
                         onPressed: () => _confirmDeleteUser(index),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.lock_reset),
-                        onPressed: () => _resetPassword(index),
-                      ),
                       Switch(
                         value: user.isEnabled,
                         onChanged: (value) => _toggleUserStatus(index),
@@ -80,7 +116,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   child: ElevatedButton(
                     onPressed: _showUserDialog,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green, // Cor do botão para verde
+                      backgroundColor: Colors.green,
                     ),
                     child: const Text('Adicionar Usuário'),
                   ),
@@ -93,17 +129,16 @@ class _UserManagementPageState extends State<UserManagementPage> {
     );
   }
 
-  void _resetPassword(int index) {
-    setState(() {
-      users[index].password = '123';
-    });
+  void _resetPassword(int index) async {
+    final user = users[index];
+    await auth.FirebaseAuth.instance
+        .sendPasswordResetEmail(email: user.email);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Senha redefinida para padrão: 123')),
+      const SnackBar(content: Text('E-mail de redefinição de senha enviado.')),
     );
   }
 
-
-  void _showUserDialog({User? user}) {
+  void _showUserDialog({UserData? user}) {
     if (user != null) {
       _nameController.text = user.name;
       _phoneController.text = user.phone;
@@ -208,11 +243,16 @@ class _UserManagementPageState extends State<UserManagementPage> {
     );
   }
 
-  void _addUser() {
+  Future<void> _addUser() async {
     final validationErrors = _validateFields();
     if (validationErrors.isEmpty) {
-      setState(() {
-        users.add(User(
+      try {
+        final newUser = await auth.FirebaseAuth.instance
+            .createUserWithEmailAndPassword(
+                email: _emailController.text, password: '123456');
+        final userDoc = _firestore.collection('users').doc(newUser.user!.uid);
+
+        final userData = UserData(
           name: _nameController.text,
           phone: _phoneController.text,
           emergencyPhone: _emergencyPhoneController.text,
@@ -221,23 +261,35 @@ class _UserManagementPageState extends State<UserManagementPage> {
           propertyName: _propertyNameController.text,
           ruralCode: _ruralCodeController.text,
           geolocation: _geolocationController.text,
-          password: '123',
           isMasterUser: _isMasterUser,
           isEnabled: true,
-        ));
+        );
+
+        await userDoc.set(userData.toFirestore());
+        setState(() {
+          users.add(userData);
+        });
+
         _clearFields();
-      });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Usuário adicionado com sucesso!')),
+        );
+      } catch (e) {
+        _showErrorDialog([e.toString()]);
+      }
     } else {
       _showErrorDialog(validationErrors);
     }
   }
 
-  void _updateUser() {
+  Future<void> _updateUser() async {
     final validationErrors = _validateFields();
     if (validationErrors.isEmpty) {
       setState(() {
         if (_editingIndex != null) {
-          users[_editingIndex!] = User(
+          final user = users[_editingIndex!];
+          final userDoc = _firestore.collection('users').doc(user.userId);
+          final updatedUser = UserData(
             name: _nameController.text,
             phone: _phoneController.text,
             emergencyPhone: _emergencyPhoneController.text,
@@ -246,22 +298,37 @@ class _UserManagementPageState extends State<UserManagementPage> {
             propertyName: _propertyNameController.text,
             ruralCode: _ruralCodeController.text,
             geolocation: _geolocationController.text,
-            password: users[_editingIndex!].password,
             isMasterUser: _isMasterUser,
-            isEnabled: users[_editingIndex!].isEnabled,
+            isEnabled: user.isEnabled,
           );
-          _clearFields();
-          _editingIndex = null;
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('Dados do usuário alterados com sucesso!')),
-          );
+          users[_editingIndex!] = updatedUser;
+          userDoc.set(updatedUser.toFirestore());
         }
+        _clearFields();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Usuário atualizado com sucesso!')),
+        );
       });
     } else {
       _showErrorDialog(validationErrors);
     }
+  }
+
+  void _editUser(int index) {
+    final user = users[index];
+    _showUserDialog(user: user);
+  }
+
+  Future<void> _deleteUser(int index) async {
+    final user = users[index];
+    await _firestore.collection('users').doc(user.userId).delete();
+    setState(() {
+      users.removeAt(index);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Usuário removido com sucesso!')),
+    );
   }
 
   void _confirmDeleteUser(int index) {
@@ -269,9 +336,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Confirmação de Exclusão'),
-          content:
-              const Text('Você tem certeza que deseja excluir este usuário?'),
+          title: const Text('Excluir Usuário'),
+          content: const Text('Tem certeza que deseja excluir este usuário?'),
           actions: [
             TextButton(
               onPressed: () {
@@ -281,7 +347,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
             ),
             TextButton(
               onPressed: () {
-                _disableUser(index);
+                _deleteUser(index);
                 Navigator.of(context).pop();
               },
               child: const Text('Excluir'),
@@ -292,65 +358,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
     );
   }
 
-  void _showErrorDialog(List<String> messages) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Erro'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: messages.map((message) => Text(message)).toList(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('OK'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  bool _validateEmail(String email) {
-    final RegExp emailRegex = RegExp(
-      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-    );
-    return emailRegex.hasMatch(email);
-  }
-
-  List<String> _validateFields() {
-    List<String> validationErrors = [];
-
-    if (_nameController.text.isEmpty) {
-      validationErrors.add('O nome do usuário é obrigatório.');
-    }
-    if (_phoneController.text.isEmpty) {
-      validationErrors.add('O telefone é obrigatório.');
-    }
-    if (_emailController.text.isEmpty ||
-        !_validateEmail(_emailController.text)) {
-      validationErrors.add('O e-mail é inválido.');
-    }
-    if (_userIdController.text.isEmpty) {
-      validationErrors.add('O ID do usuário é obrigatório.');
-    }
-    if (_propertyNameController.text.isEmpty) {
-      validationErrors.add('O nome da propriedade é obrigatório.');
-    }
-    if (_ruralCodeController.text.isEmpty) {
-      validationErrors.add('O código rural é obrigatório.');
-    }
-    if (_geolocationController.text.isEmpty) {
-      validationErrors.add('A geolocalização é obrigatória.');
-    }
-
-    return validationErrors;
+  void _toggleUserStatus(int index) {
+    setState(() {
+      users[index].isEnabled = !users[index].isEnabled;
+    });
   }
 
   void _clearFields() {
@@ -364,33 +375,50 @@ class _UserManagementPageState extends State<UserManagementPage> {
     _geolocationController.clear();
   }
 
-  void _disableUser(int index) {
-    setState(() {
-      users.removeAt(index);
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Usuário excluído com sucesso!')),
+  List<String> _validateFields() {
+    final errors = <String>[];
+
+    if (_nameController.text.isEmpty) {
+      errors.add('Nome é obrigatório.');
+    }
+    if (_phoneController.text.isEmpty) {
+      errors.add('Telefone é obrigatório.');
+    }
+    if (_emergencyPhoneController.text.isEmpty) {
+      errors.add('Telefone de emergência é obrigatório.');
+    }
+    if (_emailController.text.isEmpty) {
+      errors.add('E-mail é obrigatório.');
+    }
+
+    return errors;
+  }
+
+  void _showErrorDialog(List<String> errors) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Erro'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: errors.map((e) => Text(e)).toList(),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
     );
-  }
-
-  void _toggleUserStatus(int index) {
-    setState(() {
-      users[index].isEnabled = !users[index].isEnabled;
-
-      // Exibir mensagem informando o novo status
-      final status = users[index].isEnabled ? 'habilitado' : 'desabilitado';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Usuário ${users[index].name} foi $status.')),
-      );
-    });
-  }
-
-  void _editUser(int index) {
-    _showUserDialog(user: users[index]);
   }
 }
 
-class User {
+class UserData {
   String name;
   String phone;
   String emergencyPhone;
@@ -399,11 +427,10 @@ class User {
   String propertyName;
   String ruralCode;
   String geolocation;
-  String password;
   bool isMasterUser;
   bool isEnabled;
 
-  User({
+  UserData({
     required this.name,
     required this.phone,
     required this.emergencyPhone,
@@ -412,8 +439,37 @@ class User {
     required this.propertyName,
     required this.ruralCode,
     required this.geolocation,
-    required this.password,
-    this.isMasterUser = false,
-    this.isEnabled = true,
+    required this.isMasterUser,
+    required this.isEnabled,
   });
+
+  factory UserData.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return UserData(
+      name: data['name'] ?? '',
+      phone: data['phone'] ?? '',
+      emergencyPhone: data['emergencyPhone'] ?? '',
+      email: data['email'] ?? '',
+      userId: doc.id,
+      propertyName: data['propertyName'] ?? '',
+      ruralCode: data['ruralCode'] ?? '',
+      geolocation: data['geolocation'] ?? '',
+      isMasterUser: data['isMasterUser'] ?? false,
+      isEnabled: data['isEnabled'] ?? true,
+    );
+  }
+
+  Map<String, dynamic> toFirestore() {
+    return {
+      'name': name,
+      'phone': phone,
+      'emergencyPhone': emergencyPhone,
+      'email': email,
+      'propertyName': propertyName,
+      'ruralCode': ruralCode,
+      'geolocation': geolocation,
+      'isMasterUser': isMasterUser,
+      'isEnabled': isEnabled,
+    };
+  }
 }

@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "391747560334",
+    "firebase_url": "https://alertarural-26ff2-default-rtdb.firebaseio.com",
+    "project_id": "alertarural-26ff2",
+    "storage_bucket": "alertarural-26ff2.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:391747560334:android:8bfa350aafd7c9de6a7adf",
+        "android_client_info": {
+          "package_name": "com.example.alertarural"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD6vO0j2doFaobtcOIj7NDHEqGeBG7c-q0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:391747560334:android:5dcb9e43a6df29876a7adf",
+        "android_client_info": {
+          "package_name": "com.example.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD6vO0j2doFaobtcOIj7NDHEqGeBG7c-q0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
